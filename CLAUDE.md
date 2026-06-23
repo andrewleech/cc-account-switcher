@@ -22,12 +22,14 @@ This is a bash utility for managing multiple Claude Code accounts on macOS, Linu
 - macOS uses `security` command for Keychain operations
 - Linux/WSL uses file-based storage with 600 permissions
 
-**Account switching flow** (ccswitch.sh:614-680):
+**Account switching flow** (`perform_switch()`, ccswitch.sh:760):
 1. Backs up current account credentials and OAuth config
 2. Retrieves target account data from backup storage
 3. Writes target credentials to system location
 4. Merges target OAuth account section into `~/.claude/.claude.json`
 5. Updates `sequence.json` with new active account
+
+**Credential refresh flow** (`cmd_update()`, ccswitch.sh:526): used after re-logging in when a token goes stale. Reads the live email from `.claude.json`, resolves the matching managed account by email, and overwrites that account's stored credentials/config with the current live values (refreshing `uuid`, `activeAccountNumber`, `lastUpdated`). If the live account is unmanaged, it offers to add it instead.
 
 **Claude Code configuration locations**:
 - Primary: `~/.claude/.claude.json` (OAuth account data)
@@ -53,6 +55,9 @@ Test switches without Claude Code running:
 
 # Rotate to next account (or just run without arguments)
 ./ccswitch.sh
+
+# Refresh the stored token for the currently logged-in account (after re-login)
+./ccswitch.sh --update
 ```
 
 The script can be installed as `ccs` via `install.sh` which creates a symlink in `~/.local/bin/ccs`.
@@ -81,6 +86,7 @@ Key functions for account operations:
 - `alias_exists()` (ccswitch.sh:330-337) - Checks if alias is in use
 - `validate_alias()` (ccswitch.sh:340-348) - Validates alias format (alphanumeric, dashes, underscores)
 - `resolve_account_identifier()` (ccswitch.sh:91-117) - Converts alias/email/number to account number
+- `cmd_update()` (ccswitch.sh:526) - Refreshes stored credentials/config for the live account, matched by email
 
 ## Security Considerations
 

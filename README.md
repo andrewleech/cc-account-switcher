@@ -54,6 +54,9 @@ ccs --switch-to work
 ./ccswitch.sh --switch-to 2
 ./ccswitch.sh --switch-to user2@example.com
 
+# Refresh the stored token for the currently logged-in account (use after re-login)
+./ccswitch.sh --update
+
 # Remove an account by alias, number, or email
 ./ccswitch.sh --remove-account work
 ./ccswitch.sh --remove-account user2@example.com
@@ -72,6 +75,16 @@ ccs --switch-to work
 6. **Important**: After each switch, restart Claude Code to use the new authentication
 
 > **What gets switched:** Only your authentication credentials change. Your themes, settings, preferences, and chat history remain exactly the same.
+
+### Refreshing a Stale Login
+
+When an account's stored token goes stale, log back in to Claude Code normally, then run:
+
+```bash
+./ccswitch.sh --update
+```
+
+This reads the email currently logged in to Claude Code, finds the managed account with the matching email, and replaces its stored token and config with the fresh ones. If the logged-in account isn't managed yet, `--update` offers to add it.
 
 ### Account Aliases
 

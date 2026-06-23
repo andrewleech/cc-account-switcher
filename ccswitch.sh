@@ -522,6 +522,72 @@ cmd_remove_account() {
     echo "Account-$account_num ($email) has been removed"
 }
 
+# Refresh stored credentials/config for the currently logged-in account
+cmd_update() {
+    if [[ ! -f "$SEQUENCE_FILE" ]]; then
+        echo "Error: No accounts are managed yet"
+        exit 1
+    fi
+
+    local current_email
+    current_email=$(get_current_account)
+
+    if [[ "$current_email" == "none" ]]; then
+        echo "Error: No active Claude account found. Please log in first."
+        exit 1
+    fi
+
+    # Find the managed account whose stored email matches the live login
+    local account_num
+    account_num=$(resolve_account_identifier "$current_email")
+
+    # Not managed yet: offer to add it (captures the fresh token either way)
+    if [[ -z "$account_num" ]]; then
+        echo "Notice: Active account '$current_email' is not managed."
+        echo -n "Enter an alias for this account (e.g., 'work', 'personal'): "
+        read -r alias
+
+        if [[ -z "$alias" ]]; then
+            echo "Error: Alias cannot be empty."
+            exit 1
+        fi
+
+        cmd_add_account "$alias"
+        exit 0
+    fi
+
+    # Read live credentials and config from the Claude Code locations
+    local current_creds current_config
+    current_creds=$(read_credentials)
+    current_config=$(cat "$(get_claude_config_path)")
+
+    if [[ -z "$current_creds" ]]; then
+        echo "Error: No credentials found for current account"
+        exit 1
+    fi
+
+    # Overwrite the stored backup for this account's slot
+    write_account_credentials "$account_num" "$current_email" "$current_creds"
+    write_account_config "$account_num" "$current_email" "$current_config"
+
+    # Refresh derived state: uuid from the new config, active account, timestamp
+    local account_uuid
+    account_uuid=$(jq -r '.oauthAccount.accountUuid' "$(get_claude_config_path)")
+
+    local updated_sequence
+    updated_sequence=$(jq --arg num "$account_num" --arg uuid "$account_uuid" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+        .accounts[$num].uuid = $uuid |
+        .activeAccountNumber = ($num | tonumber) |
+        .lastUpdated = $now
+    ' "$SEQUENCE_FILE")
+
+    write_json "$SEQUENCE_FILE" "$updated_sequence"
+
+    local alias
+    alias=$(jq -r --arg num "$account_num" '.accounts[$num].alias // empty' "$SEQUENCE_FILE")
+    echo "Updated stored credentials for Account-$account_num (${alias:+$alias, }$current_email)"
+}
+
 # First-run setup workflow
 first_run_setup() {
     local current_email
@@ -771,6 +837,7 @@ show_usage() {
     echo "  --list                             List all managed accounts"
     echo "  --switch                           Rotate to next account in sequence (default)"
     echo "  --switch-to <alias|num|email>      Switch to specific account by alias, number, or email"
+    echo "  --update                           Refresh stored token for the currently logged-in account (use after re-login)"
     echo "  --help                             Show this help message"
     echo ""
     echo "Examples:"
@@ -783,6 +850,7 @@ show_usage() {
     echo "  $0 --switch-to personal"
     echo "  $0 --switch-to 2"
     echo "  $0 --switch-to user@example.com"
+    echo "  $0 --update                        # After re-logging in to Claude Code"
     echo "  $0 --remove-account work"
 }
 
@@ -815,6 +883,9 @@ main() {
         --switch-to)
             shift
             cmd_switch_to "$@"
+            ;;
+        --update)
+            cmd_update
             ;;
         --help)
             show_usage
