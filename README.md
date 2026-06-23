@@ -4,8 +4,8 @@ A simple tool to manage and switch between multiple Claude Code accounts on macO
 
 ## Features
 
-- **Multi-account management**: Add, remove, and list Claude Code accounts
-- **Quick switching**: Switch between accounts with simple commands
+- **Multi-account management**: Add, remove, and list Claude Code accounts with human-readable aliases
+- **Quick switching**: Switch between accounts using aliases, numbers, or email addresses
 - **Cross-platform**: Works on macOS, Linux, and WSL
 - **Secure storage**: Uses system keychain (macOS) or protected files (Linux/WSL)
 - **Settings preservation**: Only switches authentication - your themes, settings, and preferences remain unchanged
@@ -19,25 +19,43 @@ curl -O https://raw.githubusercontent.com/ming86/cc-account-switcher/main/ccswit
 chmod +x ccswitch.sh
 ```
 
+Optional: Install as `ccs` command:
+
+```bash
+./install.sh  # Creates symlink in ~/.local/bin/ccs
+```
+
+Then use `ccs` instead of `./ccswitch.sh`:
+```bash
+ccs              # Switch to next account
+ccs --list       # List accounts
+ccs --switch-to work
+```
+
 ## Usage
 
 ### Basic Commands
 
 ```bash
-# Add current account to managed accounts
-./ccswitch.sh --add-account
+# Add current account to managed accounts with an alias
+./ccswitch.sh --add-account work
+./ccswitch.sh --add-account personal
 
 # List all managed accounts
 ./ccswitch.sh --list
 
-# Switch to next account in sequence
+# Switch to next account in sequence (or just run without arguments)
+./ccswitch.sh
 ./ccswitch.sh --switch
 
-# Switch to specific account by number or email
+# Switch to specific account by alias, number, or email
+./ccswitch.sh --switch-to work
+./ccswitch.sh --switch-to personal
 ./ccswitch.sh --switch-to 2
 ./ccswitch.sh --switch-to user2@example.com
 
-# Remove an account
+# Remove an account by alias, number, or email
+./ccswitch.sh --remove-account work
 ./ccswitch.sh --remove-account user2@example.com
 
 # Show help
@@ -47,13 +65,21 @@ chmod +x ccswitch.sh
 ### First Time Setup
 
 1. **Log into Claude Code** with your first account (make sure you're actively logged in)
-2. Run `./ccswitch.sh --add-account` to add it to managed accounts
+2. Run `./ccswitch.sh --add-account work` to add it with an alias (use any name like 'work', 'personal', 'client-a', etc.)
 3. **Log out** and log into Claude Code with your second account
-4. Run `./ccswitch.sh --add-account` again
-5. Now you can switch between accounts with `./ccswitch.sh --switch`
+4. Run `./ccswitch.sh --add-account personal` to add it with a different alias
+5. Now you can switch between accounts with `./ccswitch.sh --switch-to work` or just `./ccswitch.sh`
 6. **Important**: After each switch, restart Claude Code to use the new authentication
 
 > **What gets switched:** Only your authentication credentials change. Your themes, settings, preferences, and chat history remain exactly the same.
+
+### Account Aliases
+
+Each account must have a unique alias when added. Aliases are human-readable names that make it easy to identify and switch between accounts:
+
+- **Allowed characters**: Letters, numbers, dashes, and underscores (e.g., `work`, `personal`, `client-a`, `dev_account`)
+- **Switching flexibility**: You can switch using the alias, account number, or email address
+- **List display**: Running `--list` shows: `1: work (user@example.com) (active)`
 
 ## Requirements
 
@@ -98,6 +124,8 @@ When switching accounts, it:
 ### If you can't add an account
 
 - Make sure you're logged into Claude Code first
+- Provide a valid alias (alphanumeric characters, dashes, and underscores only)
+- Ensure the alias isn't already in use by another account
 - Check that you have `jq` installed
 - Verify you have write permissions to your home directory
 

@@ -90,18 +90,30 @@ validate_email() {
 # Account identifier resolution function
 resolve_account_identifier() {
     local identifier="$1"
+
+    # First, check if it's a numeric account number
     if [[ "$identifier" =~ ^[0-9]+$ ]]; then
-        echo "$identifier"  # It's a number
-    else
-        # Look up account number by email
-        local account_num
-        account_num=$(jq -r --arg email "$identifier" '.accounts | to_entries[] | select(.value.email == $email) | .key' "$SEQUENCE_FILE" 2>/dev/null)
-        if [[ -n "$account_num" && "$account_num" != "null" ]]; then
-            echo "$account_num"
-        else
-            echo ""
-        fi
+        echo "$identifier"
+        return
     fi
+
+    # Then check if it's an alias
+    local account_num
+    account_num=$(jq -r --arg alias "$identifier" '.accounts | to_entries[] | select(.value.alias == $alias) | .key' "$SEQUENCE_FILE" 2>/dev/null)
+    if [[ -n "$account_num" && "$account_num" != "null" ]]; then
+        echo "$account_num"
+        return
+    fi
+
+    # Finally, check if it's an email
+    account_num=$(jq -r --arg email "$identifier" '.accounts | to_entries[] | select(.value.email == $email) | .key' "$SEQUENCE_FILE" 2>/dev/null)
+    if [[ -n "$account_num" && "$account_num" != "null" ]]; then
+        echo "$account_num"
+        return
+    fi
+
+    # Not found
+    echo ""
 }
 
 # Safe JSON write with validation
@@ -322,28 +334,69 @@ account_exists() {
     if [[ ! -f "$SEQUENCE_FILE" ]]; then
         return 1
     fi
-    
+
     jq -e --arg email "$email" '.accounts[] | select(.email == $email)' "$SEQUENCE_FILE" >/dev/null 2>&1
+}
+
+# Check if alias exists
+alias_exists() {
+    local alias="$1"
+    if [[ ! -f "$SEQUENCE_FILE" ]]; then
+        return 1
+    fi
+
+    jq -e --arg alias "$alias" '.accounts[] | select(.alias == $alias)' "$SEQUENCE_FILE" >/dev/null 2>&1
+}
+
+# Validate alias format
+validate_alias() {
+    local alias="$1"
+    # Allow alphanumeric, dashes, and underscores only
+    if [[ "$alias" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # Add account
 cmd_add_account() {
+    if [[ $# -eq 0 ]]; then
+        echo "Usage: $0 --add-account <alias>"
+        echo "Example: $0 --add-account work"
+        exit 1
+    fi
+
+    local alias="$1"
+
+    # Validate alias format
+    if ! validate_alias "$alias"; then
+        echo "Error: Invalid alias format. Use only alphanumeric characters, dashes, and underscores."
+        exit 1
+    fi
+
     setup_directories
     init_sequence_file
-    
+
+    # Check if alias already exists
+    if alias_exists "$alias"; then
+        echo "Error: Alias '$alias' is already in use."
+        exit 1
+    fi
+
     local current_email
     current_email=$(get_current_account)
-    
+
     if [[ "$current_email" == "none" ]]; then
         echo "Error: No active Claude account found. Please log in first."
         exit 1
     fi
-    
+
     if account_exists "$current_email"; then
         echo "Account $current_email is already managed."
         exit 0
     fi
-    
+
     local account_num
     account_num=$(get_next_account_number)
     
@@ -367,20 +420,21 @@ cmd_add_account() {
     
     # Update sequence.json
     local updated_sequence
-    updated_sequence=$(jq --arg num "$account_num" --arg email "$current_email" --arg uuid "$account_uuid" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+    updated_sequence=$(jq --arg num "$account_num" --arg email "$current_email" --arg uuid "$account_uuid" --arg alias "$alias" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
         .accounts[$num] = {
             email: $email,
             uuid: $uuid,
+            alias: $alias,
             added: $now
         } |
         .sequence += [$num | tonumber] |
         .activeAccountNumber = ($num | tonumber) |
         .lastUpdated = $now
     ' "$SEQUENCE_FILE")
-    
+
     write_json "$SEQUENCE_FILE" "$updated_sequence"
-    
-    echo "Added Account $account_num: $current_email"
+
+    echo "Added account '$alias' ($current_email) as Account-$account_num"
 }
 
 # Remove account
@@ -472,21 +526,29 @@ cmd_remove_account() {
 first_run_setup() {
     local current_email
     current_email=$(get_current_account)
-    
+
     if [[ "$current_email" == "none" ]]; then
         echo "No active Claude account found. Please log in first."
         return 1
     fi
-    
+
     echo -n "No managed accounts found. Add current account ($current_email) to managed list? [Y/n] "
     read -r response
-    
+
     if [[ "$response" == "n" || "$response" == "N" ]]; then
-        echo "Setup cancelled. You can run '$0 --add-account' later."
+        echo "Setup cancelled. You can run '$0 --add-account <alias>' later."
         return 1
     fi
-    
-    cmd_add_account
+
+    echo -n "Enter an alias for this account (e.g., 'work', 'personal'): "
+    read -r alias
+
+    if [[ -z "$alias" ]]; then
+        echo "Error: Alias cannot be empty."
+        return 1
+    fi
+
+    cmd_add_account "$alias"
     return 0
 }
 
@@ -511,11 +573,20 @@ cmd_list() {
     echo "Accounts:"
     jq -r --arg active "$active_account_num" '
         .sequence[] as $num |
-        .accounts["\($num)"] |
-        if "\($num)" == $active then
-            "  \($num): \(.email) (active)"
+        .accounts["\($num)"] as $account |
+        if $account.alias then
+            if "\($num)" == $active then
+                "  \($num): \($account.alias) (\($account.email)) (active)"
+            else
+                "  \($num): \($account.alias) (\($account.email))"
+            end
         else
-            "  \($num): \(.email)"
+            # Backward compatibility for accounts without aliases
+            if "\($num)" == $active then
+                "  \($num): \($account.email) (active)"
+            else
+                "  \($num): \($account.email)"
+            end
         end
     ' "$SEQUENCE_FILE"
 }
@@ -537,11 +608,19 @@ cmd_switch() {
     
     # Check if current account is managed
     if ! account_exists "$current_email"; then
-        echo "Notice: Active account '$current_email' was not managed."
-        cmd_add_account
+        echo "Notice: Active account '$current_email' is not managed."
+        echo -n "Enter an alias for this account (e.g., 'work', 'personal'): "
+        read -r alias
+
+        if [[ -z "$alias" ]]; then
+            echo "Error: Alias cannot be empty."
+            exit 1
+        fi
+
+        cmd_add_account "$alias"
         local account_num
         account_num=$(jq -r '.activeAccountNumber' "$SEQUENCE_FILE")
-        echo "It has been automatically added as Account-$account_num."
+        echo "It has been added as Account-$account_num."
         echo "Please run './ccswitch.sh --switch' again to switch to the next account."
         exit 0
     fi
@@ -684,21 +763,27 @@ show_usage() {
     echo "Multi-Account Switcher for Claude Code"
     echo "Usage: $0 [COMMAND]"
     echo ""
+    echo "Running without arguments switches to the next account (same as --switch)."
+    echo ""
     echo "Commands:"
-    echo "  --add-account                    Add current account to managed accounts"
-    echo "  --remove-account <num|email>    Remove account by number or email"
-    echo "  --list                           List all managed accounts"
-    echo "  --switch                         Rotate to next account in sequence"
-    echo "  --switch-to <num|email>          Switch to specific account number or email"
-    echo "  --help                           Show this help message"
+    echo "  --add-account <alias>              Add current account with an alias (e.g., 'work', 'personal')"
+    echo "  --remove-account <alias|num|email> Remove account by alias, number, or email"
+    echo "  --list                             List all managed accounts"
+    echo "  --switch                           Rotate to next account in sequence (default)"
+    echo "  --switch-to <alias|num|email>      Switch to specific account by alias, number, or email"
+    echo "  --help                             Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 --add-account"
+    echo "  $0 --add-account work"
+    echo "  $0 --add-account personal"
     echo "  $0 --list"
-    echo "  $0 --switch"
+    echo "  $0                                 # Switch to next account"
+    echo "  $0 --switch                        # Same as above"
+    echo "  $0 --switch-to work"
+    echo "  $0 --switch-to personal"
     echo "  $0 --switch-to 2"
     echo "  $0 --switch-to user@example.com"
-    echo "  $0 --remove-account user@example.com"
+    echo "  $0 --remove-account work"
 }
 
 # Main script logic
@@ -714,7 +799,8 @@ main() {
     
     case "${1:-}" in
         --add-account)
-            cmd_add_account
+            shift
+            cmd_add_account "$@"
             ;;
         --remove-account)
             shift
@@ -734,7 +820,7 @@ main() {
             show_usage
             ;;
         "")
-            show_usage
+            cmd_switch
             ;;
         *)
             echo "Error: Unknown command '$1'"
