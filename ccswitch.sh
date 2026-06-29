@@ -76,17 +76,6 @@ validate_json() {
     fi
 }
 
-# Email validation function
-validate_email() {
-    local email="$1"
-    # Use robust regex for email validation
-    if [[ "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
 # Account identifier resolution function
 resolve_account_identifier() {
     local identifier="$1"
@@ -351,6 +340,11 @@ alias_exists() {
 # Validate alias format
 validate_alias() {
     local alias="$1"
+    # Reject all-numeric aliases: resolve_account_identifier treats a numeric
+    # identifier as an account number, so such an alias could never be matched.
+    if [[ "$alias" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
     # Allow alphanumeric, dashes, and underscores only
     if [[ "$alias" =~ ^[a-zA-Z0-9_-]+$ ]]; then
         return 0
@@ -371,7 +365,7 @@ cmd_add_account() {
 
     # Validate alias format
     if ! validate_alias "$alias"; then
-        echo "Error: Invalid alias format. Use only alphanumeric characters, dashes, and underscores."
+        echo "Error: Invalid alias format. Use letters, numbers, dashes, and underscores, and include at least one non-digit."
         exit 1
     fi
 
@@ -440,7 +434,7 @@ cmd_add_account() {
 # Remove account
 cmd_remove_account() {
     if [[ $# -eq 0 ]]; then
-        echo "Usage: $0 --remove-account <account_number|email>"
+        echo "Usage: $0 --remove-account <alias|account_number|email>"
         exit 1
     fi
     
@@ -451,25 +445,14 @@ cmd_remove_account() {
         echo "Error: No accounts are managed yet"
         exit 1
     fi
-    
-    # Handle email vs numeric identifier
-    if [[ "$identifier" =~ ^[0-9]+$ ]]; then
-        account_num="$identifier"
-    else
-        # Validate email format
-        if ! validate_email "$identifier"; then
-            echo "Error: Invalid email format: $identifier"
-            exit 1
-        fi
-        
-        # Resolve email to account number
-        account_num=$(resolve_account_identifier "$identifier")
-        if [[ -z "$account_num" ]]; then
-            echo "Error: No account found with email: $identifier"
-            exit 1
-        fi
+
+    # Resolve alias, email, or account number to an account number
+    account_num=$(resolve_account_identifier "$identifier")
+    if [[ -z "$account_num" ]]; then
+        echo "Error: No account found matching: $identifier"
+        exit 1
     fi
-    
+
     local account_info
     account_info=$(jq -r --arg num "$account_num" '.accounts[$num] // empty' "$SEQUENCE_FILE")
     
@@ -714,7 +697,7 @@ cmd_switch() {
 # Switch to specific account
 cmd_switch_to() {
     if [[ $# -eq 0 ]]; then
-        echo "Usage: $0 --switch-to <account_number|email>"
+        echo "Usage: $0 --switch-to <alias|account_number|email>"
         exit 1
     fi
     
@@ -725,25 +708,14 @@ cmd_switch_to() {
         echo "Error: No accounts are managed yet"
         exit 1
     fi
-    
-    # Handle email vs numeric identifier
-    if [[ "$identifier" =~ ^[0-9]+$ ]]; then
-        target_account="$identifier"
-    else
-        # Validate email format
-        if ! validate_email "$identifier"; then
-            echo "Error: Invalid email format: $identifier"
-            exit 1
-        fi
-        
-        # Resolve email to account number
-        target_account=$(resolve_account_identifier "$identifier")
-        if [[ -z "$target_account" ]]; then
-            echo "Error: No account found with email: $identifier"
-            exit 1
-        fi
+
+    # Resolve alias, email, or account number to an account number
+    target_account=$(resolve_account_identifier "$identifier")
+    if [[ -z "$target_account" ]]; then
+        echo "Error: No account found matching: $identifier"
+        exit 1
     fi
-    
+
     local account_info
     account_info=$(jq -r --arg num "$target_account" '.accounts[$num] // empty' "$SEQUENCE_FILE")
     
